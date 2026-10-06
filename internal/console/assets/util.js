@@ -69,6 +69,20 @@ export function fmtAgo(v) {
 
 export const fmtNum = (n) => (Number(n) || 0).toLocaleString('en-US');
 
+/** "Tue 6:00 PM" */
+export function fmtWhen(ms) {
+  return new Date(ms).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+}
+
+/** How long until `ms`, compactly: "45m", "3h 16m", "1d 17h". */
+export function fmtIn(ms, now = Date.now()) {
+  const mins = Math.max(0, Math.round((ms - now) / 60000));
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  if (h < 24) return `${h}h ${mins % 60}m`;
+  return `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
 export function maskSecret(s) {
   const v = String(s || '');
   if (v.length <= 10) return '•'.repeat(v.length);
@@ -87,9 +101,10 @@ export function maskEmail(email) {
   return email ? maskName(email) : '';
 }
 
-// Slanted tick meter, echoing the skewed bars of the Friday Labs mark.
-export function meter(remaining, cls = '') {
-  const v = remaining == null ? 0 : Math.max(0, Math.min(100, remaining));
+// Slanted tick meter, echoing the skewed bars of the Friday Labs mark. Coloured by what's left;
+// `fill` draws a different amount (a "used" bar fills by what's used).
+export function meter(remaining, cls = '', fill = remaining) {
+  const v = fill == null ? 0 : Math.max(0, Math.min(100, fill));
   const t = tone(remaining) || 'none';
   const label = remaining == null ? '' : ` role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(v)}"`;
   return `<div class="meter tone-${t}${cls ? ` ${cls}` : ''}" style="--v:${v}"${label}><i></i></div>`;

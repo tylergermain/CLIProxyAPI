@@ -67,8 +67,8 @@ const ctx = {
 // ---------- Navigation ----------
 
 function currentRoute() {
-  const id = (location.hash.replace(/^#\/?/, '') || 'quota').split('?')[0];
-  return NAV.find((n) => n.id === id && n.page) || NAV.find((n) => n.id === 'quota');
+  const id = (location.hash.replace(/^#\/?/, '') || 'dashboard').split('?')[0];
+  return NAV.find((n) => n.id === id && n.page) || NAV.find((n) => n.id === 'dashboard');
 }
 
 function renderNav() {
