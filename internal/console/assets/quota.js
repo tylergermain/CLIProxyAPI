@@ -24,6 +24,7 @@ const CLAUDE_WINDOWS = [
 ];
 
 const CODEX_USAGE = 'https://chatgpt.com/backend-api/wham/usage';
+const CODEX_RESET_CONSUME = 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume';
 const CODEX_HEADERS = {
   Authorization: 'Bearer $TOKEN$',
   'Content-Type': 'application/json',
@@ -39,6 +40,20 @@ export const HEADLINE = {
   codex: ['weekly', 'monthly', '5h'],
 };
 
+// Windows that cap another window: Fable 5 is unusable once the 7-day limit is spent.
+const CAPS = { claude: { fable: ['7d'] } };
+
+export function effectiveRemaining(pkey, windows, id) {
+  const w = windows.find((x) => x.id === id);
+  if (!w || w.remaining == null) return null;
+  let v = w.remaining;
+  for (const capId of CAPS[pkey]?.[id] || []) {
+    const cap = windows.find((x) => x.id === capId);
+    if (cap?.remaining != null) v = Math.min(v, cap.remaining);
+  }
+  return v;
+}
+
 // Window ids preferred for the summary's secondary line.
 export const SECONDARY = {
   claude: ['7d', '5h'],
@@ -50,6 +65,7 @@ const num = (v) => {
   return typeof n === 'number' && Number.isFinite(n) ? n : null;
 };
 const clamp = (n) => Math.max(0, Math.min(100, n));
+const money = (v) => `$${Number(v).toFixed(Number(v) % 1 ? 2 : 0)}`;
 
 function upstreamError(res, what) {
   const body = res.json;
@@ -90,14 +106,13 @@ async function fetchClaude(cred) {
   const data = res.json;
   if (!data || typeof data !== 'object') throw new Error('Claude usage: empty response');
 
+  const limits = Array.isArray(data.limits) ? data.limits : [];
   // Newer responses expose model-scoped weekly limits; prefer that for Fable.
-  const scoped = Array.isArray(data.limits)
-    ? data.limits.filter((l) => {
-        const kind = String(l?.kind || '').toLowerCase();
-        const model = String(l?.scope?.model?.display_name || '').toLowerCase();
-        return kind === 'weekly_scoped' && (model === 'fable' || model === 'fable 5') && num(l?.percent) !== null;
-      })
-    : [];
+  const scoped = limits.filter((l) => {
+    const kind = String(l?.kind || '').toLowerCase();
+    const model = String(l?.scope?.model?.display_name || '').toLowerCase();
+    return kind === 'weekly_scoped' && (model === 'fable' || model === 'fable 5') && num(l?.percent) !== null;
+  });
   const fable = scoped.find((l) => l.is_active === true) || scoped[0] || null;
 
   const windows = [];
@@ -108,8 +123,47 @@ async function fetchClaude(cred) {
     }
     const w = data[key];
     if (!w || typeof w !== 'object' || !('utilization' in w)) continue;
+    // A dollar-denominated pool is a separate allowance, not a percentage window.
+    if (num(w.limit_dollars) !== null) continue;
     const used = num(w.utilization);
     windows.push({ id, label, remaining: used === null ? null : clamp(100 - used), resetAt: toMs(w.resets_at) });
+  }
+
+  const fablePool = data.iguana_necktie;
+  const poolLimit = num(fablePool?.limit_dollars);
+  if (poolLimit) {
+    const spent = num(fablePool.used_dollars) ?? 0;
+    const left = num(fablePool.remaining_dollars) ?? poolLimit - spent;
+    windows.push({
+      id: 'fable-credit', label: 'Fable 5 credit', remaining: clamp((left / poolLimit) * 100),
+      resetAt: toMs(fablePool.resets_at), detail: `${money(spent)} of ${money(poolLimit)} used`,
+    });
+  }
+
+  const flags = [];
+  const LIMIT_NAMES = { session: '5-hour limit', weekly_all: '7-day limit', weekly_scoped: 'Fable 5 limit' };
+  const reached = limits.filter((l) => (num(l?.percent) ?? 0) >= 100);
+  if (!limits.length) {
+    for (const [key, name] of [['five_hour', '5-hour limit'], ['seven_day', '7-day limit']]) {
+      if ((num(data[key]?.utilization) ?? 0) >= 100) reached.push({ name });
+    }
+  }
+  for (const l of reached) flags.push({ tone: 'bad', text: `${l.name || LIMIT_NAMES[l.kind] || 'Limit'} reached` });
+
+  const extra = data.extra_usage;
+  if (extra?.is_enabled) {
+    const places = num(extra.decimal_places) ?? 2;
+    const used = (num(extra.used_credits) ?? 0) / 10 ** places;
+    const cap = num(extra.monthly_limit);
+    if (cap) {
+      const capDollars = cap / 10 ** places;
+      windows.push({
+        id: 'credits', label: 'Usage credits', remaining: clamp(100 - (used / capDollars) * 100),
+        resetAt: null, detail: `${money(used)} of ${money(capDollars)} this month`,
+      });
+    }
+    if (extra.spend_limit_reached) flags.push({ tone: 'bad', text: 'Usage credits exhausted' });
+    else if (reached.length) flags.push({ tone: 'ok', text: 'Running on usage credits' });
   }
   if (!windows.length) throw new Error('Claude usage: no quota windows returned');
 
@@ -118,7 +172,7 @@ async function fetchClaude(cred) {
     plan = claudePlan(profile.value.json);
   }
   if (!plan && cred.account_type) plan = cred.account_type;
-  return { plan, windows };
+  return { plan, windows, flags };
 }
 
 // ---------- Codex ----------
@@ -173,10 +227,23 @@ function codexWindows(rate, prefix, labels, windows) {
   push(week, `${prefix}${monthly ? 'monthly' : 'weekly'}`, monthly ? labels.month : labels.week);
 }
 
-async function fetchCodex(cred) {
+function codexHeaders(cred) {
   const header = { ...CODEX_HEADERS };
   const account = codexAccountId(cred);
   if (account) header['Chatgpt-Account-Id'] = account;
+  return header;
+}
+
+// Redeems one Codex rate-limit reset credit for the credential.
+export async function useCodexReset(cred) {
+  const res = await apiCall(cred.auth_index, 'POST', CODEX_RESET_CONSUME, codexHeaders(cred),
+    JSON.stringify({ redeem_request_id: crypto.randomUUID() }));
+  if (res.status < 200 || res.status >= 300) throw upstreamError(res, 'Codex reset');
+  return refreshQuota(cred);
+}
+
+async function fetchCodex(cred) {
+  const header = codexHeaders(cred);
   const res = await apiCall(cred.auth_index, 'GET', CODEX_USAGE, header);
   if (res.status < 200 || res.status >= 300) throw upstreamError(res, 'Codex usage');
   const data = res.json;
@@ -201,7 +268,22 @@ async function fetchCodex(cred) {
 
   const rawPlan = String(data.plan_type || data.planType || cred.id_token?.plan_type || '').toLowerCase();
   const plan = CODEX_PLANS[rawPlan] || (rawPlan ? rawPlan.charAt(0).toUpperCase() + rawPlan.slice(1) : null);
-  return { plan, windows };
+
+  const flags = [];
+  const rate = data.rate_limit ?? data.rateLimit;
+  if (rate?.limit_reached || rate?.allowed === false) flags.push({ tone: 'bad', text: 'Limit reached' });
+  const rc = data.rate_limit_reset_credits ?? data.rateLimitResetCredits;
+  const resets = rc ? {
+    available: num(rc.available_count ?? rc.availableCount) ?? 0,
+    applicable: num(rc.applicable_available_count ?? rc.applicableAvailableCount) ?? 0,
+  } : null;
+  if (resets?.available) {
+    flags.push({ tone: resets.applicable ? 'ok' : '', text: `${resets.available} reset${resets.available === 1 ? '' : 's'} available` });
+  }
+  const credits = data.credits;
+  if (credits?.unlimited) flags.push({ tone: '', text: 'Unlimited credits' });
+  else if (num(credits?.balance) > 0) flags.push({ tone: '', text: `${Math.floor(num(credits.balance)).toLocaleString('en-US')} credits` });
+  return { plan, windows, flags, resets };
 }
 
 // ---------- Kimi ----------
@@ -309,7 +391,7 @@ const cache = store.get('quota', {});
 const listeners = new Set();
 const inflight = new Map();
 
-export const STALE_MS = 10 * 60 * 1000;
+export const STALE_MS = 60 * 1000;
 const cacheKey = (cred) => `${cred.auth_index}:${cred.name}`;
 
 export function quotaFor(cred) {
@@ -353,6 +435,8 @@ export async function refreshQuota(cred) {
         // Keep the last good numbers visible beneath the error.
         windows: prev?.windows || [],
         plan: prev?.plan || null,
+        flags: prev?.flags || [],
+        resets: prev?.resets || null,
       };
     } finally {
       inflight.delete(key);

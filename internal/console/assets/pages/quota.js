@@ -1,8 +1,8 @@
 // Quota Management: provider summary cards plus per-credential usage windows.
 
-import { esc, icon, store, fmtRelative, fmtStamp, maskName, tone } from '../util.js';
+import { esc, icon, store, fmtRelative, fmtStamp, maskName, meter, toast } from '../util.js';
 import { PINNED, providerKey, providerMeta, glyph } from '../providers.js';
-import { quotaFor, refreshQuota, refreshMany, onQuota, isLoading, HEADLINE, SECONDARY } from '../quota.js';
+import { quotaFor, refreshQuota, refreshMany, onQuota, isLoading, HEADLINE, SECONDARY, effectiveRemaining, useCodexReset } from '../quota.js';
 
 const SORTS = [
   ['ledger', 'Ledger'],
@@ -19,20 +19,22 @@ function resetLine(w) {
 }
 
 function windowCell(w) {
-  const t = tone(w.remaining);
   const pct = w.remaining == null ? '--' : `${Math.round(w.remaining)}%`;
+  const foot = w.detail
+    ? `${esc(w.detail)}${w.resetAt && w.resetAt > Date.now() ? ` · resets ${esc(fmtStamp(w.resetAt))}` : ''}`
+    : resetLine(w);
   return `
     <div class="win">
       <div class="win-top"><span class="win-label" title="${esc(w.label)}">${esc(w.label)}</span><span class="win-pct">${pct}</span></div>
-      <div class="meter"><i class="fill-${t}" style="width:${w.remaining == null ? 0 : w.remaining}%"></i></div>
-      <div class="win-reset">${resetLine(w)}</div>
+      ${meter(w.remaining)}
+      <div class="win-reset">${foot}</div>
     </div>`;
 }
 
 function skeletonWins() {
   return `<div class="wins">${[0, 1, 2].map(() => `
     <div class="win"><div class="win-top"><div class="skeleton" style="width:55%"></div></div>
-    <div class="meter"></div><div class="skeleton" style="width:70%;margin-top:12px"></div></div>`).join('')}</div>`;
+    ${meter(null)}<div class="skeleton" style="width:70%;margin-top:12px"></div></div>`).join('')}</div>`;
 }
 
 function credRow(c, showEmails) {
@@ -63,6 +65,10 @@ function credRow(c, showEmails) {
     body = '<div class="cred-msg">Not fetched yet.</div>';
   }
 
+  for (const f of q?.flags || []) {
+    pills.push(`<span class="pill ${f.tone || 'plain'}">${esc(f.text)}</span>`);
+  }
+  const canReset = !c.disabled && (q?.resets?.applicable ?? 0) > 0;
   const updated = q?.fetchedAt ? `<span class="faint" title="Last fetched ${esc(fmtStamp(q.fetchedAt))}">${plan ? '· ' : ''}${esc(fmtRelative(q.fetchedAt))}</span>` : '';
   return `
     <div class="cred" data-index="${esc(c.auth_index)}">
@@ -72,6 +78,7 @@ function credRow(c, showEmails) {
       </div>
       ${body}
       <div class="cred-actions">
+        ${canReset ? `<button class="btn sm" data-action="use-reset" data-index="${esc(c.auth_index)}" style="margin-bottom:6px">${icon('refresh')}Use reset</button>` : ''}
         <button class="link-btn${loading ? ' spin' : ''}" data-action="refresh-one" data-index="${esc(c.auth_index)}" ${loading || c.disabled ? 'disabled' : ''}>
           ${icon('refresh')}${loading ? 'Refreshing' : 'Refresh quota'}
         </button>
@@ -114,12 +121,14 @@ function summarize(pkey, creds) {
     let seen = 0;
     let soonest = null;
     const segs = active.map((c) => {
-      const w = (quotaFor(c)?.windows || []).find((x) => x.id === id);
-      if (!w || w.remaining == null) return null;
-      sum += w.remaining;
+      const ws = quotaFor(c)?.windows || [];
+      const w = ws.find((x) => x.id === id);
+      const v = effectiveRemaining(pkey, ws, id);
+      if (!w || v == null) return null;
+      sum += v;
       seen += 1;
       if (w.resetAt && w.resetAt > Date.now() && (soonest == null || w.resetAt < soonest)) soonest = w.resetAt;
-      return w.remaining;
+      return v;
     });
     return { sum, seen, soonest, segs };
   };
@@ -141,7 +150,7 @@ function summaryCard(pkey, creds, expanded) {
   const h = s.headline;
   const big = h && h.seen ? `${Math.round(h.sum)}%` : '--';
   const segs = (h ? h.segs : creds.filter((c) => !c.disabled).map(() => null))
-    .map((v) => `<div class="seg"><i class="fill-${tone(v)}" style="width:${v == null ? 0 : v}%"></i></div>`).join('');
+    .map((v) => meter(v, 'seg')).join('');
   const reset = h?.soonest ? `<b>${esc(fmtRelative(h.soonest))}</b> · ${esc(fmtStamp(h.soonest))}` : (h?.seen ? 'No reset pending' : 'No data yet');
   const others = s.others.filter((o) => o.seen);
   const first = others[0];
@@ -157,7 +166,7 @@ function summaryCard(pkey, creds, expanded) {
         <span class="sum-creds">${s.count} credential${s.count === 1 ? '' : 's'}</span></div>
       <div class="sum-label">${esc(h?.label || 'Quota')}</div>
       <div class="sum-value"><span class="big">${big}</span><span class="of">of ${s.denom}%</span></div>
-      <div class="segs">${segs || '<div class="seg"></div>'}</div>
+      <div class="segs">${segs || meter(null, 'seg')}</div>
       <div class="sum-reset">${reset}</div>
       ${more}
     </div>`;
@@ -259,6 +268,12 @@ export function quota(el, ctx) {
     } else if (action === 'refresh-one') {
       const c = ctx.creds.find((x) => String(x.auth_index) === t.dataset.index);
       if (c) refreshQuota(c);
+    } else if (action === 'use-reset') {
+      const c = ctx.creds.find((x) => String(x.auth_index) === t.dataset.index);
+      if (!c) return;
+      if (!confirm(`Redeem one Codex rate-limit reset for ${c.name}? This uses up the reset credit.`)) return;
+      t.disabled = true;
+      useCodexReset(c).then(() => toast('Codex limits reset', 'ok')).catch((err) => ctx.handleError(err));
     } else if (action === 'toggle-more') {
       const p = t.dataset.provider;
       if (expanded.has(p)) expanded.delete(p); else expanded.add(p);
@@ -283,11 +298,13 @@ export function quota(el, ctx) {
     })
     .catch((err) => { loaded = true; render(); ctx.handleError(err); });
 
-  // Keep relative reset times current.
+  // Keep relative reset times current, and refetch live quota every 5 minutes.
   const tick = setInterval(schedule, 60000);
+  const poll = setInterval(() => refreshMany(ctx.creds, { staleOnly: true }), 5 * 60000);
   return () => {
     off();
     clearInterval(tick);
+    clearInterval(poll);
     if (raf) cancelAnimationFrame(raf);
   };
 }

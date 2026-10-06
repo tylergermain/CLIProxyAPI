@@ -49,9 +49,9 @@ export function fmtRelative(ms, now = Date.now()) {
   const diff = ms - now;
   const abs = Math.abs(diff);
   const min = Math.round(abs / 60000);
+  if (min < 1) return 'just now';
   let s;
-  if (min < 1) s = 'moments';
-  else if (min < 60) s = `${min} min`;
+  if (min < 60) s = `${min} min`;
   else if (abs < 24 * 3600000) {
     const h = Math.round(abs / 3600000);
     s = `${h} hour${h === 1 ? '' : 's'}`;
@@ -85,6 +85,14 @@ export function maskName(name) {
 
 export function maskEmail(email) {
   return email ? maskName(email) : '';
+}
+
+// Slanted tick meter, echoing the skewed bars of the Friday Labs mark.
+export function meter(remaining, cls = '') {
+  const v = remaining == null ? 0 : Math.max(0, Math.min(100, remaining));
+  const t = tone(remaining) || 'none';
+  const label = remaining == null ? '' : ` role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(v)}"`;
+  return `<div class="meter tone-${t}${cls ? ` ${cls}` : ''}" style="--v:${v}"${label}><i></i></div>`;
 }
 
 export function tone(remaining) {

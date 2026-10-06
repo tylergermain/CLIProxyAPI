@@ -336,9 +336,8 @@ input, select, textarea { font: inherit; color: inherit; }
 .sum-value { display: flex; align-items: baseline; gap: 8px; margin-bottom: 14px; }
 .sum-value .big { font-size: 34px; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .sum-value .of { color: var(--text-2); font-size: 16px; }
-.segs { display: flex; gap: 5px; height: 5px; margin-bottom: 14px; }
-.seg { flex: 1; background: var(--track); border-radius: 3px; overflow: hidden; }
-.seg i { display: block; height: 100%; border-radius: 3px; }
+.segs { display: flex; gap: 10px; margin-bottom: 16px; padding: 0 2px; }
+.segs .meter { flex: 1; }
 .sum-reset { color: var(--muted); font-size: 14.5px; }
 .sum-reset b { color: var(--text-2); font-weight: 600; }
 .sum-more {
@@ -354,11 +353,41 @@ input, select, textarea { font: inherit; color: inherit; }
 .sum-more-row .link-btn { margin-left: auto; padding: 0; }
 
 /* ---------- Meters ---------- */
-.fill-g { background: var(--green); }
-.fill-a { background: var(--amber); }
-.fill-r { background: var(--red); }
-.meter { height: 5px; background: var(--track); border-radius: 3px; overflow: hidden; }
-.meter i { display: block; height: 100%; border-radius: 3px; transition: width .4s ease; }
+/* Slanted tick meter: skewed like the Friday Labs mark, cut into ticks by a mask,
+   filled with a deep-to-bright gradient that ends in a lit leading tick. */
+.meter {
+  --tick: 9px;
+  --gap: 4px;
+  --c0: var(--track); --c1: var(--track); --c2: var(--track);
+  position: relative;
+  height: 11px;
+  margin: 0 4px;
+  transform: skewX(-34deg);
+  background: var(--track);
+  -webkit-mask: repeating-linear-gradient(90deg, #000 0 var(--tick), transparent var(--tick) calc(var(--tick) + var(--gap)));
+          mask: repeating-linear-gradient(90deg, #000 0 var(--tick), transparent var(--tick) calc(var(--tick) + var(--gap)));
+}
+.meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--v) * 1%);
+  background: linear-gradient(90deg, var(--c0) 0%, var(--c1) 72%, var(--c2) 100%);
+  transition: width .7s cubic-bezier(.2, .8, .2, 1);
+}
+.meter i::after {
+  content: "";
+  position: absolute;
+  right: 0; top: 0; bottom: 0;
+  width: var(--tick);
+  background: var(--c2);
+  opacity: .9;
+}
+.meter.tone-none i::after { display: none; }
+.meter.seg { height: 9px; --tick: 6px; --gap: 3px; }
+.tone-g { --c0: #04512a; --c1: #09ca59; --c2: #5ee99b; }
+.tone-a { --c0: #5a4510; --c1: #f2c94c; --c2: #ffe9a3; }
+.tone-r { --c0: #4d1517; --c1: #e5484d; --c2: #ff9b9e; }
+@media (prefers-reduced-motion: reduce) { .meter i { transition: none; } }
 .pct-g { color: var(--text); }
 
 /* ---------- Credential groups ---------- */

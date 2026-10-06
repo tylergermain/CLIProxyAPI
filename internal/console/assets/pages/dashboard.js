@@ -1,6 +1,6 @@
 // Dashboard: credential health, recent request activity, endpoint and quota at a glance.
 
-import { esc, icon, fmtNum, fmtRelative, fmtStamp, maskSecret, maskName, copyText, tone, store } from '../util.js';
+import { esc, icon, fmtNum, fmtRelative, fmtStamp, maskSecret, maskName, copyText, tone, store, meter } from '../util.js';
 import { providerKey, providerMeta, glyph } from '../providers.js';
 import { quotaFor, onQuota, HEADLINE } from '../quota.js';
 
@@ -142,7 +142,7 @@ export function dashboard(el, ctx) {
               <div class="grow"><div style="font-weight:600">${esc(providerMeta(k).name)}</div>
                 <div class="sub">${list.length} credential${list.length === 1 ? '' : 's'} · ${fmtNum(ok)} ok · ${fmtNum(bad)} failed</div></div>
               ${hl ? `<div style="width:180px"><div class="win-top"><span class="win-label" style="font-size:13px">${esc(hl.label)} · avg</span><span class="win-pct" style="font-size:14px">${Math.round(hl.avg)}%</span></div>
-                <div class="meter"><i class="fill-${tone(hl.avg)}" style="width:${hl.avg}%"></i></div></div>` : '<span class="sub">no quota data</span>'}
+                ${meter(hl.avg)}</div>` : '<span class="sub">no quota data</span>'}
             </div>`;
           }).join('')}</div>` : `<div class="empty"><h3>No credentials</h3><p>Log in to a provider to start routing requests.</p><a class="btn primary" href="#/oauth">${icon('user')}OAuth Login</a></div>`}
         </div>
