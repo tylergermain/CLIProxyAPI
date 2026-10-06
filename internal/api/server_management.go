@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/console"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/managementasset"
 	log "github.com/sirupsen/logrus"
 )
@@ -335,4 +336,27 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 	}
 
 	c.File(filePath)
+}
+
+// serveConsole serves the embedded Friday Proxy console. It follows the same
+// availability rules as the bundled management control panel.
+func (s *Server) serveConsole(c *gin.Context) {
+	cfg := s.cfg
+	if cfg == nil || cfg.Home.Enabled || cfg.RemoteManagement.DisableControlPanel {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+	filePath := c.Param("filepath")
+	if filePath == "" {
+		c.Redirect(http.StatusMovedPermanently, "/console/")
+		return
+	}
+	assets, errAssets := console.FileSystem()
+	if errAssets != nil {
+		log.WithError(errAssets).Error("failed to open embedded console assets")
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+	c.Header("Cache-Control", "no-cache")
+	c.FileFromFS(filePath, assets)
 }
