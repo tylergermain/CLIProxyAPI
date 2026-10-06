@@ -338,11 +338,12 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 	c.File(filePath)
 }
 
-// serveConsole serves the embedded Friday Proxy console. It follows the same
-// availability rules as the bundled management control panel.
+// serveConsole serves the embedded Friday Proxy console. Unlike the downloaded
+// management.html panel, it ships in the binary, so disable-control-panel (which
+// stops that panel being served and synced) leaves it on.
 func (s *Server) serveConsole(c *gin.Context) {
 	cfg := s.cfg
-	if cfg == nil || cfg.Home.Enabled || cfg.RemoteManagement.DisableControlPanel {
+	if cfg == nil || cfg.Home.Enabled {
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
