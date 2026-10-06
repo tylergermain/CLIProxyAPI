@@ -13,7 +13,8 @@ const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: 'dashboard', page: dashboardPage.dashboard },
   { id: 'quick-start', label: 'Quick Start', icon: 'zap', page: gatewayPages.quickStart },
   { section: 'Gateway' },
-  { id: 'providers', label: 'AI Providers', icon: 'providers', page: gatewayPages.providers },
+  // Hidden from the sidebar (rarely used); still at #/providers.
+  { id: 'providers', label: 'API Providers', icon: 'providers', page: gatewayPages.providers, hidden: true },
   { id: 'auth-files', label: 'Auth Files', icon: 'shield', page: credentialPages.authFiles, badge: 'creds' },
   { id: 'oauth', label: 'OAuth Login', icon: 'user', page: credentialPages.oauthLogin },
   { section: 'Observe' },
@@ -73,7 +74,7 @@ function currentRoute() {
 
 function renderNav() {
   const active = currentRoute()?.id;
-  nav.innerHTML = NAV.map((n) => {
+  nav.innerHTML = NAV.filter((n) => !n.hidden).map((n) => {
     if (n.section) return `<div class="nav-section">${esc(n.section)}</div>`;
     const badge = n.badge === 'creds' && ctx.creds.length ? `<span class="count">${ctx.creds.length}</span>` : '';
     const inner = `${icon(n.icon)}<span class="nav-label">${esc(n.label)}</span>${badge}`;

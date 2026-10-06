@@ -112,7 +112,7 @@ export function providers(el, ctx) {
     const totalKeys = sections.reduce((a, [, , groups]) => a + groups.reduce((b, g) => b + (Array.isArray(g.keys) ? g.keys.length : 0), 0), 0);
 
     el.innerHTML = `
-      ${header('AI Providers', `${sections.length} provider${sections.length === 1 ? '' : 's'} <span class="dot">·</span> ${totalKeys} API key${totalKeys === 1 ? '' : 's'}`,
+      ${header('API Providers', `${sections.length} provider${sections.length === 1 ? '' : 's'} <span class="dot">·</span> ${totalKeys} API key${totalKeys === 1 ? '' : 's'}`,
         `<a class="btn" href="#/config">${icon('sliders')}Edit in Config Panel</a><a class="btn primary" href="#/oauth">${icon('user')}OAuth Login</a>`)}
       <div class="banner info">${icon('info')}<div>API-key upstreams come from the <span class="mono">api-keys</span> section of config.yaml. OAuth subscriptions (Claude, Codex, Antigravity…) are managed under Auth Files and OAuth Login.</div></div>
       ${sections.length ? sections.map(([id, name, groups]) => `
